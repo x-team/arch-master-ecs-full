@@ -34,10 +34,8 @@ Parameters:
 
   deletionPolicyCondition:
     Type: String
-    Default: ''
+    Default: 'Delete'
 
-Conditions: 
-  delPolicy: !Equals [!Ref deletionPolicyCondition, '']
 
 Resources:
   CloudFormationExecutionRole:
@@ -138,7 +136,7 @@ Resources:
     Type: AWS::S3::Bucket
     Properties: 
       BucketName: !Sub cp-artifact-code-${Name}
-    DeletionPolicy: !If [delPolicy, !Ref deletionPolicyCondition, !Ref 'AWS::NoValue']
+    DeletionPolicy: !Ref deletionPolicyCondition
 
 
   CodeBuildProject:
