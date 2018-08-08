@@ -146,7 +146,7 @@ Resources:
         Type: CODEPIPELINE
       Environment:
         Type: "LINUX_CONTAINER"
-        ComputeType: BUILD_GENERAL1_MEDIUM
+        ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/docker:1.12.1
         EnvironmentVariables:
           - Name: AWS_DEFAULT_REGION
