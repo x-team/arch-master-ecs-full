@@ -1,0 +1,129 @@
+Description: >
+  Master Template ECS Full stack ECS Service and Task Definition
+
+Parameters:
+  Tag:
+    Type: String
+    Default: latest
+
+  TaskDefDesiredCount:
+    Type: Number
+    Default: 1
+
+  TargetGroup:
+    Type: String
+
+  Cluster:
+    Type: String
+
+  ExposedContainerPort: 
+    Type: Number
+    Default: 80
+
+  ContainerBaseMemory:
+    Type: Number
+    Default: 512
+
+  InstanceType:
+    Type: String
+    Description: Instance type for the EC2 cluster instances
+    Default: t2.small
+
+  ContainerNameApp:
+    Type: String
+
+  Environment:
+    Type: String
+
+  AppOwner:
+    Type: String
+
+  Name:
+    Type: String
+
+  ECRRepoName:
+    Type: String
+
+  AWSENVPATH:
+    Type: String
+
+
+Resources:
+  ECSServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ecs-service-${Name}
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "ecs.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+
+  Repository:
+    Type: AWS::ECR::Repository
+    Properties: 
+      RepositoryName: !Ref ECRRepoName
+
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref Cluster
+      Role: !Ref ECSServiceRole
+      DesiredCount: !Ref TaskDefDesiredCount
+      TaskDefinition: !Ref TaskDefinition
+      PlacementConstraints:
+      - Expression: !Sub attribute:ecs.instance-type ==${InstanceType}
+        Type: memberOf
+      PlacementStrategies:
+      - Type: spread
+        Field: attribute:ecs.availability-zone
+      LoadBalancers:
+        - ContainerName: !Ref ContainerNameApp
+          ContainerPort: !Ref ExposedContainerPort
+          TargetGroupArn: !Ref TargetGroup
+
+  CloudWatchLogsGroup:
+        Type: AWS::Logs::LogGroup
+        Properties:
+            LogGroupName: !Ref Name
+            RetentionInDays: 365
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${Name}-app
+      ContainerDefinitions:
+        - Name: !Ref ContainerNameApp
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepoName}:${Tag}
+          MemoryReservation: !Ref ContainerBaseMemory
+          PortMappings:
+            - ContainerPort: !Ref ExposedContainerPort
+          Environment:
+            - Name: Tag
+              Value: !Ref Tag
+            - Name: AWS_ENV_PATH
+              Value: !Ref AWSENVPATH
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref Name
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Ref Name
+
+
+Outputs:
+  Repository:
+    Value: !Ref Repository
+
+  ServiceName:
+    Value: !Ref Service
+    Export:
+      Name: !Sub "${Name}-${Environment}-ServiceName"

@@ -1,0 +1,229 @@
+Description: >
+  Master Template ECS Full Code Deployment Pipeline
+
+Parameters:
+  Name:
+    Type: String
+
+  GitHubRepoCode:
+    Type: String
+
+  GitHubUser:
+    Type: String
+    Default: x-team
+
+  GitHubToken:
+    NoEcho: true
+    Type: String
+
+  RepoBranch:
+    Type: String
+    Default: master
+
+  TemplateBucketName:
+    Type: String
+
+  Environment:
+    Type: String
+
+  AppOwner:
+    Type: String
+
+  ECRRepoName:
+    Type: String
+
+
+Resources:
+  CloudFormationExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub cfn-code-${Name}
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "cloudformation.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - iam:*
+                  - application-autoscaling:*
+                  - cloudwatch:*
+                  - s3:*
+
+
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub cp-code-${Name}
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "codepipeline.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource:
+                  - "*"
+                Effect: Allow
+                Action:
+                  - s3:*
+                  - cloudformation:*
+                  - lambda:*
+                  - iam:*
+                  - codebuild:*
+                  - ecs:*
+                  - ecr:*
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub cb-code-${Name}
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "codebuild.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - ecr:GetAuthorizationToken
+                  - s3:*
+              - Resource: !Sub arn:aws:s3:::${ArtifactBucket}/*
+                Effect: Allow
+                Action:
+                  - s3:*
+              - Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/*
+                Effect: Allow
+                Action:
+                  - ecr:*
+                  - iam:*
+                  
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties: 
+      BucketName: !Sub cp-artifact-code-${Name}
+
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub cb-code-${Name}
+      Description: !Sub ${Name} Codebuild project
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Source:
+        Type: CODEPIPELINE
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: "LINUX_CONTAINER"
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/docker:1.12.1
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: REPOSITORY_URI_NEW
+            Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepoName}
+      ServiceRole: !Ref CodeBuildServiceRole
+      TimeoutInMinutes: 10
+      Tags:
+        - Key: Name
+          Value: !Ref Name
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: !Ref AppOwner
+
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub ${Name}
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        - Name: Source-Github
+          Actions:
+            - Name: Source-Github
+              ActionTypeId: 
+                Category: Source
+                Owner: ThirdParty
+                Version: '1'
+                Provider: GitHub
+              OutputArtifacts: 
+                - Name: SourceCodeFiles
+              Configuration: 
+                Owner: !Ref GitHubUser
+                Repo: !Ref GitHubRepoCode
+                Branch: !Ref RepoBranch
+                OAuthToken: !Ref GitHubToken
+              RunOrder: 1
+        - Name: Build-Source-Code
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              InputArtifacts:
+                - Name: SourceCodeFiles
+              OutputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+        - Name: !Sub Deploy-${Environment}
+          Actions:
+            - Name: Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: ECS
+              Configuration:
+                ClusterName:
+                  Fn::ImportValue: !Sub "${Name}-${Environment}-ClusterName"
+                ServiceName:
+                  Fn::ImportValue: !Sub "${Name}-${Environment}-ServiceName"
+                FileName: build.json
+              InputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+
+
+
+Outputs:
+  PipelineURL:
+    Value: !Sub https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${Pipeline}

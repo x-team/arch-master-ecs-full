@@ -1,0 +1,151 @@
+Description: >
+  Master Template ECS Full stack Architecture Deployment Pipeline IaC implementation
+
+
+Parameters:
+
+  Name:
+    Type: String
+
+  GitHubRepo:
+    Type: String
+
+  GitHubUser:
+    Type: String
+    Default: x-team
+
+  GitHubToken:
+    NoEcho: true
+    Type: String
+
+  RepoBranch:
+    Type: String
+    Default: master
+
+  TemplateBucketName:
+    Type: String
+
+  Environment:
+    Type: String
+
+
+Resources:
+  CloudFormationExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub cfn-arch-${Name}
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "cloudformation.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - iam:*
+                  - application-autoscaling:*
+                  - cloudwatch:*
+                  - s3:*
+
+
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub cp-arch-${Name}
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "codepipeline.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource:
+                  - "*"
+                Effect: Allow
+                Action:
+                  - s3:*
+                  - cloudformation:*
+                  - lambda:*
+                  - iam:*
+                  
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties: 
+      BucketName: !Sub cp-artifact-arch-${Name}
+
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub arch-${Name}
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        - Name: Source-Github-S3
+          Actions:
+            - Name: Source-GitHub
+              ActionTypeId: 
+                Category: Source
+                Owner: ThirdParty
+                Version: '1'
+                Provider: GitHub
+              OutputArtifacts: 
+                - Name: ArchTemplateFiles
+              Configuration: 
+                Owner: !Ref GitHubUser
+                Repo: !Ref GitHubRepo
+                Branch: !Ref RepoBranch
+                OAuthToken: !Ref GitHubToken
+              RunOrder: 1
+            - Name: Source-S3
+              ActionTypeId: 
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: S3
+              OutputArtifacts: 
+                - Name: SourceOutput
+              Configuration: 
+                S3Bucket: !Sub arch-${Name}
+                S3ObjectKey: !Sub parameters_${Environment}.json
+              RunOrder: 1
+        - Name: IaC-Process
+          Actions:
+            - Name: !Sub Deploy-to-${Name}
+              InputArtifacts:
+                - Name: ArchTemplateFiles
+              ActionTypeId:
+                Category: Invoke
+                Owner: AWS
+                Provider: Lambda
+                Version: 1
+              Configuration:
+                FunctionName: architecture-simple-iac
+                UserParameters: !Sub |
+                  {
+                    "stack":"${Name}","file":"main-arch.yaml","parametersfilename":"parameters_${Environment}.json","artifact":"ArchTemplateFiles","bucket":"arch-${Name}" 
+                  }
+              RunOrder: 1
+
+Outputs:
+  PipelineUrl:
+    Value: !Sub https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${Pipeline}

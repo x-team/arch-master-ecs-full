@@ -1,0 +1,257 @@
+Description: >
+  Master ECS Full Nested Stack Launcher templates and Deploy configuration based on Github, CodeBuild, ECS.
+
+
+Parameters:
+
+  VpcCIDR:
+    Type: String
+    Description: VPC CIDR block
+    
+  Subnet1CIDR:
+    Type: String
+    Description: Subnet1 CIDR block
+    
+  Subnet2CIDR:
+    Type: String
+    Description: Subnet2 CIDR block
+    
+  TemplateBucketName:
+    Type: String
+    Description: Bucket keeping the architecture template files
+    Default: arch-master-templ-full-ecs
+    
+  ClusterSize:
+    Type: Number
+    Description: How many EC2 instance will run in the cluster
+    Default: 1
+
+  TaskDefDesiredCount:
+    Type: Number
+    Description: How many Task Def are going to run in one EC2 instance
+    Default: 0
+
+  InstanceType:
+    Type: String
+    Description: Instance type for the EC2 cluster instances
+    Default: t2.small
+
+  AutoScalingMaxSize:
+    Type: Number
+    Description: AutoScaling maximum amount of Ec2 Instances
+    Default: 10
+
+  KeyPairName:
+    Type: String
+    Description: SSH KeyPairName
+    Default: MasterECSFullKey
+    
+  SGIngressCidr: 
+    Type: String
+    Default: "0.0.0.0/0"
+
+  SGIngressProtocol: 
+    Type: String
+    Default: "TCP"
+
+  SGIngressFromPort:
+    Type: Number
+    Default: 80
+
+  SGIngressToPort:
+    Type: Number
+    Default: 80
+
+  LBListenerTGPort:
+    Type: Number
+    Default: 80
+
+  ExposedContainerPort:
+    Type: Number
+    Default: 80
+
+  LBHealthCheckProtocol:
+    Type: String
+    Default: HTTP
+
+  DestinationCidrBlock:
+    Type: String
+    Default: 0.0.0.0/0
+
+  ContainerNameApp:
+    Type: String
+    
+  ContainerBaseMemory:
+    Type: Number
+    Default: 512
+
+  Environment:
+    Type: String
+
+  AppOwner:
+    Type: String
+
+  Tag:
+    Type: String
+    Default: latest
+
+  ECRRepoName:
+    Type: String
+
+  AWSENVPATH:
+    Type: String
+
+  DBPORT:
+    Type: Number
+    Default: 3306
+
+  DBUSER:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+
+  DBPASSWORD:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    NoEcho: true
+
+  DBDATABASE:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+
+  archGitHubRepo:
+    Type: String
+  
+  codeGitHubRepo:
+    Type: String
+
+  GitHubUser: 
+    Type: String
+    Default: x-team
+  
+  GitHubToken: 
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: /dev/arch-master-templ-full-ecs/githubtoken
+    NoEcho: true
+  
+  RepoBranch: 
+    Type: String
+    Default: master
+
+
+Resources:
+  
+  VPC:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplateBucketName}/vpc.yaml"
+      Parameters:
+        Name: !Ref AWS::StackName
+        VpcCIDR: !Ref VpcCIDR
+        Subnet1CIDR: !Ref Subnet1CIDR
+        Subnet2CIDR: !Ref Subnet2CIDR
+        DestinationCidrBlock: !Ref DestinationCidrBlock
+        AppOwner: !Ref AppOwner
+        Environment: !Ref Environment
+
+  LoadBalancer:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplateBucketName}/load-balancer.yaml"
+      Parameters:
+        Name: !Ref AWS::StackName
+        Subnets: !GetAtt VPC.Outputs.Subnets
+        VpcId: !GetAtt VPC.Outputs.VpcId
+        SGIngressCidr: !Ref SGIngressCidr
+        SGIngressProtocol: !Ref SGIngressProtocol
+        SGIngressFromPort: !Ref SGIngressFromPort
+        SGIngressToPort: !Ref SGIngressToPort
+        LBListenerTGPort: !Ref LBListenerTGPort
+        LBHealthCheckProtocol: !Ref LBHealthCheckProtocol
+        AppOwner: !Ref AppOwner
+        Environment: !Ref Environment
+
+  Cluster:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplateBucketName}/ecs-cluster.yaml"
+      Parameters:
+        SourceSecurityGroup: !GetAtt LoadBalancer.Outputs.SecurityGroup
+        Subnets: !GetAtt VPC.Outputs.Subnets
+        VpcId: !GetAtt VPC.Outputs.VpcId
+        VpcDefaultSG: !GetAtt VPC.Outputs.VpcDefaultSG
+        ClusterSize: !Ref ClusterSize
+        InstanceType: !Ref InstanceType
+        AutoScalingMaxSize: !Ref AutoScalingMaxSize
+        KeyPairName: !Ref KeyPairName
+        Name: !Ref AWS::StackName
+        AppOwner: !Ref AppOwner
+        Environment: !Ref Environment
+
+  Service:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplateBucketName}/service.yaml"
+      Parameters:
+        Cluster: !GetAtt Cluster.Outputs.ClusterName
+        TargetGroup: !GetAtt LoadBalancer.Outputs.TargetGroup
+        ContainerNameApp: !Ref ContainerNameApp
+        TaskDefDesiredCount: !Ref TaskDefDesiredCount
+        ExposedContainerPort: !Ref ExposedContainerPort
+        ContainerBaseMemory: !Ref ContainerBaseMemory
+        InstanceType: !Ref InstanceType
+        ECRRepoName: !Ref ECRRepoName
+        Name: !Ref AWS::StackName
+        AppOwner: !Ref AppOwner
+        Environment: !Ref Environment
+        AWSENVPATH: !Ref AWSENVPATH
+
+#  DB:
+#    Type: AWS::CloudFormation::Stack
+#    Properties:
+#      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplateBucketName}/db.yaml"
+#      Parameters:
+#        VpcId: !GetAtt VPC.Outputs.VpcId
+#        Subnets: !GetAtt VPC.Outputs.Subnets
+#        SourceSecurityGroup: !GetAtt LoadBalancer.Outputs.SecurityGroup
+#        DBPORT: !Ref DBPORT
+#        DBUSER: !Ref DBUSER
+#        DBPASSWORD: !Ref DBPASSWORD
+#        DBDATABASE: !Ref DBDATABASE
+#        VpcDefaultSG: !GetAtt VPC.Outputs.VpcDefaultSG
+#        Environment: !Ref Environment
+#        AppOwner: !Ref AppOwner
+#        Name: !Ref AWS::StackName
+
+  Codepipeline:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: Service
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplateBucketName}/code-pipeline.yaml"
+      Parameters:
+        Name: !Ref AWS::StackName
+        GitHubRepoCode: !Ref codeGitHubRepo
+        GitHubUser: !Ref GitHubUser
+        GitHubToken: !Ref GitHubToken
+        RepoBranch: !Ref RepoBranch
+        TemplateBucketName: !Ref TemplateBucketName
+        Environment: !Ref Environment
+        AppOwner: !Ref AppOwner
+        ECRRepoName: !Ref ECRRepoName
+
+
+  Archpipeline:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: Service
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplateBucketName}/arch-pipeline.yaml"
+      Parameters:
+        Name: !Ref AWS::StackName
+        GitHubRepo: !Ref archGitHubRepo
+        GitHubUser: !Ref GitHubUser
+        GitHubToken: !Ref GitHubToken
+        RepoBranch: !Ref RepoBranch
+        TemplateBucketName: !Ref TemplateBucketName
+        Environment: !Ref Environment
+
+
+Outputs:
+  ServiceUrl:
+    Description: Backend URL ready to use.
+    Value: !GetAtt LoadBalancer.Outputs.ServiceUrl

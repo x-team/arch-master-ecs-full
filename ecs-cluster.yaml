@@ -1,0 +1,266 @@
+Description: >
+  Master Template ECS Full stack ECS Cluster definition with autoscaling.
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t2.small
+
+  ClusterSize:
+    Type: Number
+    Default: 1
+
+  Subnets:
+    Type: List<AWS::EC2::Subnet::Id>
+
+  SourceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+  VpcDefaultSG:
+    Type: String
+
+  AutoScalingMaxSize:
+    Type: Number
+    Default: 10
+
+  KeyPairName:
+    Type: String
+
+  Environment:
+    Type: String
+
+  AppOwner:
+    Type: String
+
+  Name:
+    Type: String
+
+
+Mappings:
+  AWSRegionToAMI:
+    us-east-1:
+      AMI: ami-5253c32d
+    us-east-2:
+      AMI: ami-956e52f0
+    us-west-1:
+      AMI: ami-6b81980b
+    us-west-2:
+      AMI: ami-d2f489aa
+    eu-west-1:
+      AMI: ami-ba346ec9
+    eu-west-2:
+      AMI: ami-42c5cf26
+    eu-central-1:
+      AMI: ami-e012d48f
+    ap-northeast-1:
+      AMI: ami-08f7956f
+    ap-southeast-1:
+      AMI: ami-f4832f97
+    ap-southeast-2:
+      AMI: ami-774b7314
+    ca-central-1:
+      AMI: ami-be45f7da
+
+
+Resources:
+  ECSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      RoleName: !Sub ecs-${AWS::StackName}
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "ec2.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      Policies: 
+        - PolicyName: "root"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - Resource: "*"
+                Effect: "Allow"
+                Action:
+                  - ecs:CreateCluster
+                  - ecs:DeregisterContainerInstance
+                  - ecs:DiscoverPollEndpoint
+                  - ecs:Poll
+                  - ecs:RegisterContainerInstance
+                  - ecs:StartTelemetrySession
+                  - ecs:Submit*
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:Describe*
+                  - elasticloadbalancing:DeregisterInstancesFromLoadBalancer
+                  - elasticloadbalancing:DeregisterTargets
+                  - elasticloadbalancing:Describe*
+                  - elasticloadbalancing:RegisterInstancesWithLoadBalancer
+                  - elasticloadbalancing:RegisterTargets
+                  - logs:*
+                  - ssm:*
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref ECSRole
+
+  SecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: !Sub ${AWS::StackName}-ECS-Cluster
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !Ref SourceSecurityGroup
+          IpProtocol: -1
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Ref Name
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: !Ref AppOwner
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref AWS::StackName
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier: !Ref Subnets
+      LaunchConfigurationName: !Ref LaunchConfiguration
+      MinSize: !Ref ClusterSize
+      MaxSize: !Ref AutoScalingMaxSize
+      DesiredCapacity: !Ref ClusterSize
+      Tags: 
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-ECS
+          PropagateAtLaunch: 'true'
+        - Key: Environment
+          Value: !Ref Environment
+          PropagateAtLaunch: 'true'
+        - Key: Owner
+          Value: !Ref AppOwner
+          PropagateAtLaunch: 'true'
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT15M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: !Ref ClusterSize
+        MaxBatchSize: !Ref AutoScalingMaxSize
+        PauseTime: PT15M
+        WaitOnResourceSignals: true
+
+  LaunchConfiguration:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          commands:
+            01_add_instance_to_cluster:
+                command: !Sub echo ECS_CLUSTER=${Cluster} > /etc/ecs/ecs.config
+          files:
+            "/etc/cfn/cfn-hup.conf":
+              mode: 000400
+              owner: root
+              group: root
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+            "/etc/cfn/hooks.d/cfn-auto-reloader.conf":
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.ContainerInstances.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --region ${AWS::Region} --stack ${AWS::StackName} --resource LaunchConfiguration
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: true
+                ensureRunning: true
+                files:
+                  - /etc/cfn/cfn-hup.conf
+                  - /etc/cfn/hooks.d/cfn-auto-reloader.conf
+    Properties:
+      ImageId: !FindInMap [ AWSRegionToAMI, !Ref "AWS::Region", AMI ]
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      KeyName: !Ref KeyPairName
+      SecurityGroups:
+        - !Ref SecurityGroup
+        - !Ref VpcDefaultSG
+      UserData:
+        "Fn::Base64": !Sub |
+          #!/bin/bash
+          yum install -y aws-cfn-bootstrap
+          /opt/aws/bin/cfn-init -v --region ${AWS::Region} --stack ${AWS::StackName} --resource LaunchConfiguration
+          /opt/aws/bin/cfn-signal -e $? --region ${AWS::Region} --stack ${AWS::StackName} --resource AutoScalingGroup
+
+
+  ServerScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref 'AutoScalingGroup'
+      Cooldown: '60'
+      ScalingAdjustment: 1
+  
+  ServerScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref 'AutoScalingGroup'
+      Cooldown: '60'
+      ScalingAdjustment: -1
+  
+  CPUAlarmHigh:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: !Sub ${AWS::StackName} Scale-Up if CPU > 80% for 10 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      AlarmActions: [!Ref 'ServerScaleUpPolicy']
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value: !Ref 'AutoScalingGroup'
+      ComparisonOperator: GreaterThanThreshold
+  
+  CPUAlarmLow:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: !Sub ${AWS::StackName} Scale-Down if CPU < 60% for 10 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 60
+      AlarmActions: [!Ref 'ServerScaleDownPolicy']
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value: !Ref 'AutoScalingGroup'
+      ComparisonOperator: LessThanThreshold
+
+Outputs:
+  ClusterName:
+      Value: !Ref Cluster
+      Export:
+        Name: !Sub "${Name}-${Environment}-ClusterName"
