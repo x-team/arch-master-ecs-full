@@ -134,6 +134,9 @@ Parameters:
     Type: String
     Default: master
 
+  deletionPolicy:
+    Type: String
+    Default: false
 
 Resources:
   
@@ -234,6 +237,7 @@ Resources:
         Environment: !Ref Environment
         AppOwner: !Ref AppOwner
         ECRRepoName: !Ref ECRRepoName
+        deletionPolicy: !Ref deletionPolicy
 
 
   Archpipeline:

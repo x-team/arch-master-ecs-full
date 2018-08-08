@@ -130,7 +130,7 @@ Resources:
               RunOrder: 1
         - Name: IaC-Process
           Actions:
-            - Name: !Sub Deploy-to-${Name}
+            - Name: !Sub IaC-${Environment}
               InputArtifacts:
                 - Name: ArchTemplateFiles
               ActionTypeId:
