@@ -32,10 +32,6 @@ Parameters:
   ECRRepoName:
     Type: String
 
-  deletionPolicyCondition:
-    Type: String
-    Default: 'Delete'
-
 
 Resources:
   CloudFormationExecutionRole:
@@ -136,7 +132,6 @@ Resources:
     Type: AWS::S3::Bucket
     Properties: 
       BucketName: !Sub cp-artifact-code-${Name}
-    DeletionPolicy: !Ref deletionPolicyCondition
 
 
   CodeBuildProject:

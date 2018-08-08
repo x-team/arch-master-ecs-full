@@ -134,10 +134,6 @@ Parameters:
     Type: String
     Default: master
 
-  deletionPolicyCondition:
-    Type: String
-    Default: false
-
 Resources:
   
   VPC:
@@ -237,7 +233,6 @@ Resources:
         Environment: !Ref Environment
         AppOwner: !Ref AppOwner
         ECRRepoName: !Ref ECRRepoName
-        deletionPolicyCondition: !Ref deletionPolicyCondition
 
 
   Archpipeline:
