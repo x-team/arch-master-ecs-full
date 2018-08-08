@@ -137,7 +137,7 @@ Resources:
     Properties: 
       BucketName: !Sub cp-artifact-code-${Name}
     DeletionPolicy:
-      !If [deletionPolicy, Delete, Retain]
+      !If [deletionPolicy, 'Delete', 'Retain']
 
 
 
