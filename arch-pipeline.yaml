@@ -102,6 +102,18 @@ Resources:
       Stages:
         - Name: Source-Github-S3
           Actions:
+            - Name: Source-S3
+              ActionTypeId: 
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: S3
+              OutputArtifacts: 
+                - Name: SourceOutput
+              Configuration: 
+                S3Bucket: !Sub arch-${Name}
+                S3ObjectKey: !Sub main-arch.yaml
+              RunOrder: 1
             - Name: Source-GitHub
               ActionTypeId: 
                 Category: Source
@@ -115,18 +127,6 @@ Resources:
                 Repo: !Ref GitHubRepo
                 Branch: !Ref RepoBranch
                 OAuthToken: !Ref GitHubToken
-              RunOrder: 1
-            - Name: Source-S3
-              ActionTypeId: 
-                Category: Source
-                Owner: AWS
-                Version: 1
-                Provider: S3
-              OutputArtifacts: 
-                - Name: SourceOutput
-              Configuration: 
-                S3Bucket: !Sub arch-${Name}
-                S3ObjectKey: !Sub parameters_${Environment}.json
               RunOrder: 1
         - Name: IaC-Process
           Actions:

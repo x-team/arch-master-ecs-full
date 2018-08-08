@@ -45,7 +45,7 @@ Resources:
   SecurityGroup:
     Type: "AWS::EC2::SecurityGroup"
     Properties:
-      GroupDescription: !Sub ${Name}-ALB
+      GroupDescription: !Sub alb-${Name}
       SecurityGroupIngress:
         - CidrIp: !Ref SGIngressCidr
           IpProtocol: !Ref SGIngressProtocol
