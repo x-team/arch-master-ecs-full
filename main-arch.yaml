@@ -134,7 +134,7 @@ Parameters:
     Type: String
     Default: master
 
-  deletionPolicy:
+  deletionPolicyCondition:
     Type: String
     Default: false
 
@@ -237,7 +237,7 @@ Resources:
         Environment: !Ref Environment
         AppOwner: !Ref AppOwner
         ECRRepoName: !Ref ECRRepoName
-        deletionPolicy: !Ref deletionPolicy
+        deletionPolicyCondition: !Ref deletionPolicyCondition
 
 
   Archpipeline:
